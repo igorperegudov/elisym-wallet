@@ -65,19 +65,19 @@ const MAX_AMOUNT_STRING_LENGTH = 64;
 export function parseAmount(asset: Asset, human: string): bigint {
   const trimmed = human.trim();
   if (!trimmed) {
-    throw new Error(`${asset.symbol} amount is empty`);
+    throw new Error(`${asset.symbol} amount is empty.`);
   }
   if (trimmed.length > MAX_AMOUNT_STRING_LENGTH) {
     throw new Error(
-      `${asset.symbol} amount is too long (max ${MAX_AMOUNT_STRING_LENGTH} characters)`,
+      `${asset.symbol} amount is too long (max ${MAX_AMOUNT_STRING_LENGTH} characters).`,
     );
   }
   if (trimmed.startsWith('-')) {
-    throw new Error(`${asset.symbol} amount cannot be negative`);
+    throw new Error(`${asset.symbol} amount cannot be negative.`);
   }
   if (!DECIMAL_RE.test(trimmed)) {
     throw new Error(
-      `${asset.symbol} amount must be a non-negative decimal (e.g. "0.5", "1"); got "${human}"`,
+      `${asset.symbol} amount must be a non-negative decimal (e.g. "0.5", "1"); got "${human}".`,
     );
   }
 
@@ -94,7 +94,7 @@ export function parseAmount(asset: Asset, human: string): bigint {
 
   if (fracPart.length > asset.decimals) {
     throw new Error(
-      `${asset.symbol} amount has too many decimals (max ${asset.decimals}); got "${human}"`,
+      `${asset.symbol} amount has too many decimals (max ${asset.decimals}); got "${human}".`,
     );
   }
 
@@ -129,7 +129,7 @@ export function formatAmount(asset: Asset, raw: bigint): string {
 export function resolveAmount(asset: Asset, amount: bigint | string): bigint {
   if (typeof amount === 'bigint') {
     if (amount < 0n) {
-      throw new Error(`${asset.symbol} amount cannot be negative`);
+      throw new Error(`${asset.symbol} amount cannot be negative.`);
     }
     return amount;
   }

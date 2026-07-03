@@ -12,7 +12,9 @@
  *
  * Transfers reserve their amount atomically (check-then-increment) BEFORE
  * signing, so two concurrent transfers cannot both pass the cap against a
- * stale counter; a failed send releases the reservation.
+ * stale counter. A send that provably fails before broadcast releases the
+ * reservation; an ambiguous failure during or after broadcast keeps it,
+ * because the transaction may still have landed.
  *
  * State is in-memory; use `toJSON()` / `SpendTracker.fromJSON()` to persist a
  * budget across process restarts (essential for rolling windows - an agent
@@ -28,6 +30,13 @@ import type { Asset } from './assets.js';
 /** Stable per-asset counter key: chain plus mint (tokens) or token id (native coins). */
 export function assetKey(asset: Asset): string {
   return `${asset.chain}:${asset.mint ?? asset.token}`;
+}
+
+/** Human-readable window length: whole hours as "24h", otherwise minutes as "90 min". */
+export function formatWindow(windowMs: number): string {
+  return windowMs % 3_600_000 === 0
+    ? `${windowMs / 3_600_000}h`
+    : `${Math.round(windowMs / 60_000)} min`;
 }
 
 /**
@@ -69,13 +78,11 @@ export class SpendLimitError extends Error {
 
   constructor(asset: Asset, attempted: bigint, spent: bigint, limit: bigint, windowMs?: number) {
     const remaining = limit > spent ? limit - spent : 0n;
-    const scope =
-      windowMs === undefined ? 'session' : `${Math.round(windowMs / 60_000)} min window`;
+    const scope = windowMs === undefined ? 'session' : `${formatWindow(windowMs)} window`;
     super(
-      `Spend limit reached for ${asset.symbol} (${scope}): ` +
-        `attempted ${formatAmount(asset, attempted)}, ` +
-        `already spent ${formatAmount(asset, spent)} of ${formatAmount(asset, limit)} ` +
-        `(remaining ${formatAmount(asset, remaining)}).`,
+      `Transfer of ${formatAmount(asset, attempted)} would exceed the ${asset.symbol} ` +
+        `spend limit (${scope}): already spent ${formatAmount(asset, spent)} of ` +
+        `${formatAmount(asset, limit)}, remaining ${formatAmount(asset, remaining)}.`,
     );
     this.name = 'SpendLimitError';
     this.asset = asset;
@@ -149,7 +156,7 @@ export class SpendTracker {
    */
   setLimit(asset: Asset, limit: bigint | string, windowMs?: number): void {
     if (windowMs !== undefined && (!Number.isFinite(windowMs) || windowMs <= 0)) {
-      throw new Error(`windowMs must be a positive number of milliseconds; got ${windowMs}`);
+      throw new Error(`windowMs must be a positive number of milliseconds; got ${windowMs}.`);
     }
     const ledger = this.ledger(asset);
     ledger.limit = resolveAmount(asset, limit);
@@ -363,7 +370,7 @@ export class SpendTracker {
    */
   static fromJSON(snapshot: SpendTrackerSnapshot, options: SpendTrackerOptions = {}): SpendTracker {
     if (!snapshot || snapshot.version !== 1) {
-      throw new Error(`Unsupported SpendTracker snapshot version: ${snapshot?.version}`);
+      throw new Error(`Unsupported SpendTracker snapshot version: ${snapshot?.version}.`);
     }
     if (!Array.isArray(snapshot.ledgers)) {
       throw new Error('SpendTracker snapshot is malformed: "ledgers" must be an array.');
@@ -378,14 +385,14 @@ export class SpendTracker {
         entry.windowMs !== undefined &&
         (!Number.isFinite(entry.windowMs) || entry.windowMs <= 0)
       ) {
-        throw new Error(`SpendTracker snapshot has an invalid windowMs: ${entry.windowMs}`);
+        throw new Error(`SpendTracker snapshot has an invalid windowMs: ${entry.windowMs}.`);
       }
       if (!Array.isArray(entry.entries)) {
         throw new Error('SpendTracker snapshot has a ledger with malformed entries.');
       }
       const entries = entry.entries.map((e) => {
         if (!e || !Number.isFinite(e.at)) {
-          throw new Error(`SpendTracker snapshot has an invalid entry timestamp: ${e?.at}`);
+          throw new Error(`SpendTracker snapshot has an invalid entry timestamp: ${e?.at}.`);
         }
         tracker.reservationSeq += 1;
         return {
@@ -449,10 +456,10 @@ function toLedgerAmount(value: string, label: string): bigint {
   try {
     parsed = BigInt(value);
   } catch {
-    throw new Error(`SpendTracker snapshot has a non-integer ${label}: ${value}`);
+    throw new Error(`SpendTracker snapshot has a non-integer ${label}: ${value}.`);
   }
   if (parsed < 0n) {
-    throw new Error(`SpendTracker snapshot has a negative ${label}: ${value}`);
+    throw new Error(`SpendTracker snapshot has a negative ${label}: ${value}.`);
   }
   return parsed;
 }

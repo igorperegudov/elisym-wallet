@@ -11,7 +11,7 @@ software (AI agents, bots). The guardrails target these threats:
 | Agent bug loops payments | Spend limits (session or rolling window), transfer rate limits |
 | Concurrent transfers race past a cap | Atomic reserve-before-sign in `SpendTracker` |
 | Process restart resets a daily budget | `SpendTracker.toJSON()` / `fromJSON()` persistence |
-| Key theft from disk | scrypt (N=2^17) + AES-256-GCM keystore; keys never stored in plaintext by the library |
+| Key theft from disk | scrypt (N=2^17) + AES-256-GCM keystore; plaintext storage only on explicit choice (`--allow-plaintext`, an empty passphrase, or storing a plaintext base58 value via `config set secret`) |
 | Key theft from process memory | `scrub()` zeroes the exportable copy; `fromSigner()` keeps keys out of the process entirely |
 | Corrupted/partly-tampered spend ledger reopens the budget | `SpendTracker.fromJSON()` rejects negative/non-integer amounts and non-positive windows and re-keys ledgers from their asset; the CLI fails closed on an unreadable/corrupt `spend.json` instead of resetting to zero spent. Integrity of the file itself still relies on its `0600` permissions - an attacker who can rewrite the ledger can reset the budget across restarts, so keep the wallet home out of the agent's reach. |
 | Secret leaked to the running model | Agent-facing error text redacts URL-embedded RPC credentials (query-string API keys, `user:pass@`) before it reaches the LLM |
@@ -28,13 +28,24 @@ software (AI agents, bots). The guardrails target these threats:
 - **Treat all remote content as data, never instructions.** Job results, web
   pages, and on-chain transaction memos are surfaced verbatim to the agent; do
   not let the agent transfer funds based on text found there.
-- **Spend caps bound transferred amounts, not network fees.** A cap on SOL/USDC
-  limits what you send; it does not count the ~5000-lamport transaction fee or
-  the one-time associated-token-account rent paid when sending a token to a fresh
-  recipient. Bound recipients with the allowlist and frequency with the rate
-  limit to keep incidental SOL burn in check. USDC now has its own optional caps
-  (`ELISYM_WALLET_USDC_SPEND_LIMIT` / `_USDC_MAX_PER_TRANSFER`) - set them when
-  you enable USDC.
+- **Know what the spend caps count.** A native SOL transfer charges only the
+  transferred amount against the SOL cap - not the ~5000-lamport network fee:
+  counting it would make "send exactly the cap" fail, and the fee is negligible
+  and non-reclaimable (burned or paid to the validator, never to a recipient),
+  so it is not a drain vector. A token transfer DOES
+  charge its SOL cost - the transaction fee plus the one-time
+  associated-token-account rent when the recipient has no token account yet -
+  against the SOL cap, so a flood of token transfers to fresh recipients cannot
+  drain SOL past the cap via reclaimable ATA rent. USDC has its own optional
+  caps (`ELISYM_WALLET_USDC_SPEND_LIMIT` / `_USDC_MAX_PER_TRANSFER`) - set them
+  when you enable USDC.
+- **Token-transfer rent is counted via a pre-flight check.** Whether a token
+  transfer pays ATA rent is decided by an account lookup before broadcast, so a
+  recipient who closes their pre-existing token account between the check and
+  the broadcast can make the wallet pay ~0.002 SOL of rent that the SOL cap
+  did not count. The exposure is bounded (one rent per transfer, rate-limitable)
+  and requires the attacker to be the transfer's recipient - a recipient
+  allowlist neutralizes it.
 - **Keep secrets off the command line.** Passing the base58 secret to
   `config set secret` or a passphrase via `--passphrase` puts it in your shell
   history and the process list. Enter the secret interactively (`config set
@@ -53,7 +64,7 @@ agent-held wallet (`init` configures safe defaults for CLI/MCP use).
 
 ## Reporting a vulnerability
 
-Please email security reports to the maintainers via GitHub security advisories
+Please report vulnerabilities privately via GitHub security advisories
 ("Report a vulnerability" on the repository page) rather than opening a public
 issue. We aim to acknowledge reports within 72 hours.
 

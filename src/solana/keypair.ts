@@ -51,7 +51,7 @@ export async function signerFromSecretKeyBytes(bytes: Uint8Array): Promise<KeyPa
   return createKeyPairSignerFromBytes(bytes, true);
 }
 
-/** Encode a 64-byte secret key as base58 (solana-keygen compatible). */
+/** Encode a 64-byte secret key as base58 (same layout solana-keygen uses; Phantom-style encoding). */
 export function secretKeyToBase58(bytes: Uint8Array): string {
   assertSecretKeyLength(bytes.length);
   return BASE58_DECODER.decode(bytes);

@@ -41,7 +41,7 @@ describe('SpendTracker', () => {
       expect.unreachable();
     } catch (e) {
       const err = e as SpendLimitError;
-      expect(err.message).toContain('attempted 0.2 SOL');
+      expect(err.message).toContain('Transfer of 0.2 SOL would exceed the SOL spend limit');
       expect(err.message).toContain('already spent 0.9 SOL of 1 SOL');
       expect(err.message).toContain('remaining 0.1 SOL');
     }
@@ -184,7 +184,13 @@ describe('SpendTracker rolling windows', () => {
   it('reports the window in the error message', () => {
     const tracker = new SpendTracker([{ asset: NATIVE_SOL, limit: 100n, windowMs: 24 * HOUR }]);
     tracker.reserve(NATIVE_SOL, 100n);
-    expect(() => tracker.reserve(NATIVE_SOL, 1n)).toThrow(/1440 min window/);
+    expect(() => tracker.reserve(NATIVE_SOL, 1n)).toThrow(/24h window/);
+  });
+
+  it('reports sub-hour windows in minutes', () => {
+    const tracker = new SpendTracker([{ asset: NATIVE_SOL, limit: 100n, windowMs: 90 * 60_000 }]);
+    tracker.reserve(NATIVE_SOL, 100n);
+    expect(() => tracker.reserve(NATIVE_SOL, 1n)).toThrow(/90 min window/);
   });
 
   it('rejects invalid windows', () => {

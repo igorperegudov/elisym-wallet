@@ -191,7 +191,7 @@ describe('walletTools', () => {
     // 0.02 already spent, would push the 0.05 session cap over the line
     wallet.spendTracker.record(NATIVE_SOL, 20_000_000n);
     const capRejected = await tool.execute({ to: other.address, amount: '0.04' });
-    expect(capRejected).toContain('Error: Spend limit reached');
+    expect(capRejected).toContain('would exceed the SOL spend limit');
 
     // and the rejected previews reserved nothing beyond the seeded 0.02
     expect(wallet.spendTracker.spent(NATIVE_SOL)).toBe(20_000_000n);
@@ -227,7 +227,7 @@ describe('walletTools', () => {
     wallet.spendTracker.record(NATIVE_SOL, 100_000_000n);
     const nonce = /confirm_nonce="([0-9a-f]+)"/.exec(preview)?.[1];
     const out = await tool.execute({ to: other.address, amount: '0.1', confirm_nonce: nonce });
-    expect(out).toContain('Error: Spend limit reached');
+    expect(out).toContain('would exceed the SOL spend limit');
   });
 });
 
@@ -257,7 +257,7 @@ describe('redactSecrets', () => {
   });
 
   it('leaves plain messages and bare hosts untouched', () => {
-    expect(redactSecrets('Spend limit reached for SOL')).toBe('Spend limit reached for SOL');
+    expect(redactSecrets('Spend limit exceeded for SOL')).toBe('Spend limit exceeded for SOL');
     expect(redactSecrets('cannot reach https://rpc.example.com')).toBe(
       'cannot reach https://rpc.example.com',
     );

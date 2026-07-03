@@ -2,7 +2,7 @@
 
 A wallet library built for AI agents. Give your agent a wallet, hard guardrails, and ready-made tools - in a few lines of TypeScript, or as a drop-in MCP server with zero code.
 
-Chain-pluggable by design: the guardrails, tools, and MCP server are chain-agnostic; Solana (via [`@solana/kit`](https://github.com/anza-xyz/kit)) is the first adapter, EVM is on the roadmap. Extracted from the [elisym](https://github.com/elisymlabs/elisym) agent payment stack, where it powers wallets for AI agents that discover and pay each other. Works in Node.js, Bun, and the browser (keystore and MCP server are Node/Bun-only).
+Chain-pluggable by design: the guardrails, tools, and MCP server are chain-agnostic; Solana (via [`@solana/kit`](https://github.com/anza-xyz/kit)) is the first adapter, and EVM is on the roadmap. Extracted from the [elisym](https://github.com/elisymlabs/elisym) agent payment stack, where it powers wallets for AI agents that discover and pay each other. Works in Node.js, Bun, and the browser (keystore and MCP server are Node/Bun-only).
 
 ## Why this library
 
@@ -14,7 +14,7 @@ Handing a private key to an autonomous agent is the easy part. The hard part is 
 - **Agent tools out of the box** - framework-agnostic tool descriptors that plug into Vercel AI SDK, MCP, LangChain, or any function-calling loop
 - **MCP server mode** - `npx @elisym/wallet mcp` exposes the same guarded tools to Claude, Cursor, or Windsurf without writing any code
 
-Plus the regular wallet surface: keypairs (solana-keygen compatible), SOL + SPL balances and transfers with idempotent ATA creation, on-chain memos, transaction history, deposit waiting, off-chain message signing, and AES-256-GCM + scrypt key encryption at rest.
+Plus the regular wallet surface: keypairs (64-byte solana-keygen layout), SOL + SPL balances and transfers with idempotent ATA creation, on-chain memos, transaction history, deposit waiting, off-chain message signing, and AES-256-GCM + scrypt key encryption at rest.
 
 ## Install
 
@@ -53,7 +53,7 @@ console.log('Sent:', explorerUrl);
 `walletTools()` returns plain tool descriptors - name, description, JSON Schema, `execute()` - that map 1:1 onto any function-calling framework:
 
 ```ts
-import { SolanaWallet, USDC_MAINNET, walletTools } from '@elisym/wallet';
+import { SolanaWallet, NATIVE_SOL, USDC_MAINNET, walletTools } from '@elisym/wallet';
 
 const wallet = await SolanaWallet.fromBase58(secret, {
   spendLimits: [{ asset: NATIVE_SOL, limit: '0.5', windowMs: 86_400_000 }], // 0.5 SOL/day
@@ -61,7 +61,7 @@ const wallet = await SolanaWallet.fromBase58(secret, {
 });
 
 const tools = walletTools(wallet, { assets: [USDC_MAINNET] });
-// -> get_wallet_address, get_balance, transfer_sol, transfer_token, get_recent_transactions
+// -> get_wallet_address, get_balance, transfer_sol, get_recent_transactions, transfer_token
 ```
 
 Transfers made through these tools are **two-step by default**: the first call returns a human-readable preview and a one-time nonce; the agent must repeat the call with the same parameters plus the nonce. A prompt-injected "send everything to X" cannot fire in one shot, and the preview gives the agent (or a supervising human) a chance to catch the mismatch.
@@ -87,16 +87,16 @@ await generateText({ model, tools: aiTools, prompt: 'Check my balance' });
 
 ### MCP server
 
-```ts
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+The package ships its own dependency-free stdio server - the descriptors already carry exactly what MCP needs (name, description, JSON Schema, a text-returning `execute`):
 
-for (const t of walletTools(wallet)) {
-  server.registerTool(
-    t.name,
-    { description: t.description, inputSchema: t.parameters },
-    async (input) => ({ content: [{ type: 'text', text: await t.execute(input) }] }),
-  );
-}
+```ts
+import { runMcpServer } from '@elisym/wallet/mcp';
+
+await runMcpServer({
+  name: 'agent-wallet',
+  version: '1.0.0',
+  tools: walletTools(wallet, { assets: [USDC_MAINNET] }),
+});
 ```
 
 LangChain, ElizaOS, and anything else with function calling work the same way: the descriptors are plain data.
@@ -114,6 +114,7 @@ npx @elisym/wallet init
 # day-to-day
 npx @elisym/wallet balance                 # SOL/token balances + spend budget
 npx @elisym/wallet send <address> 0.1      # preview -> y/N confirmation -> send
+# token sends need USDC enabled once: elisym-wallet config set usdc 1
 npx @elisym/wallet send <address> 1.25 --token usdc --memo "invoice 7"
 npx @elisym/wallet history --limit 20      # recent transactions with memos
 npx @elisym/wallet address                 # address + network
@@ -125,7 +126,7 @@ npx @elisym/wallet config set allowed-recipients addr1,addr2
 npx @elisym/wallet config get network / unset rate-limit / path
 ```
 
-Config keys: `secret`, `address`, `network`, `rpc-url`, `spend-limit`, `spend-window-hours`, `max-per-transfer`, `allowed-recipients`, `rate-limit`, `usdc`, `confirm`. Values are validated at `config set` time.
+Config keys: `secret`, `address`, `network`, `rpc-url`, `spend-limit`, `spend-window-hours`, `max-per-transfer`, `usdc-spend-limit`, `usdc-max-per-transfer`, `allowed-recipients`, `rate-limit`, `usdc`, `confirm`. Values are validated at `config set` time.
 
 ### Multiple wallets (profiles)
 
@@ -150,8 +151,8 @@ claude mcp add wallet-ops     -e ELISYM_WALLET_PROFILE=ops     -e ELISYM_WALLET_
 
 UX details that matter:
 
-- **Read-only commands never ask for a passphrase.** `init` caches the public address in the profile, so `balance`, `history`, and `address` work without touching the secret. Only `send` decrypts the key (prompting interactively when the passphrase is not in the environment).
-- **Budgets survive between runs.** The spend ledger persists to `~/.elisym-wallet/spend.json`, so a "0.5 SOL per 24h" cap counts across separate `send` invocations and MCP server restarts - not per process.
+- **Read-only commands don't need the passphrase.** `init` caches the public address in the profile, so `balance`, `history`, and `address` work without touching the secret; they fall back to decrypting it only when no address is cached (e.g. an env-only setup with an encrypted secret). `send` and `mcp` always decrypt the key (`send` prompts for the passphrase interactively when it is not in the environment).
+- **Budgets survive between runs.** The spend ledger persists to `~/.elisym-wallet/spend.json`, so a "1 SOL per 24h" cap counts across separate `send` invocations and MCP server restarts - not per process.
 - **Guardrails run before the preview.** A transfer that would break a cap or the allowlist fails immediately with the exact reason; `--yes` skips only the confirmation, never the checks.
 - **Secrets are protected from accidents.** `init`, `generate --save`, and `config set secret` refuse to overwrite an existing secret without `--force`; profile files are written with `0600` permissions.
 
@@ -191,7 +192,9 @@ Or in any MCP client's JSON config:
         "ELISYM_WALLET_SPEND_WINDOW_HOURS": "24",
         "ELISYM_WALLET_MAX_PER_TRANSFER": "0.1",
         "ELISYM_WALLET_ALLOWED_RECIPIENTS": "addr1,addr2",
-        "ELISYM_WALLET_USDC": "1"
+        "ELISYM_WALLET_USDC": "1",
+        "ELISYM_WALLET_USDC_SPEND_LIMIT": "25",
+        "ELISYM_WALLET_USDC_MAX_PER_TRANSFER": "10"
       }
     }
   }
@@ -205,9 +208,11 @@ Or in any MCP client's JSON config:
 | `ELISYM_WALLET_PASSPHRASE` | passphrase for an encrypted secret |
 | `ELISYM_WALLET_NETWORK` | `mainnet-beta` (default), `devnet`, `testnet` |
 | `ELISYM_WALLET_RPC_URL` | custom RPC endpoint |
-| `ELISYM_WALLET_SPEND_LIMIT` | spend cap in SOL (session, or rolling with the next var) |
-| `ELISYM_WALLET_SPEND_WINDOW_HOURS` | makes the cap a rolling window, e.g. `24` |
+| `ELISYM_WALLET_SPEND_LIMIT` | spend cap in SOL (session, or rolling with the window var) |
+| `ELISYM_WALLET_SPEND_WINDOW_HOURS` | makes the SOL and USDC caps rolling windows, e.g. `24` |
 | `ELISYM_WALLET_MAX_PER_TRANSFER` | per-transfer cap in SOL |
+| `ELISYM_WALLET_USDC_SPEND_LIMIT` | spend cap in USDC (session, or rolling with the window var) |
+| `ELISYM_WALLET_USDC_MAX_PER_TRANSFER` | per-transfer cap in USDC |
 | `ELISYM_WALLET_ALLOWED_RECIPIENTS` | comma-separated recipient allowlist |
 | `ELISYM_WALLET_RATE_LIMIT` | `N/SECONDS`, e.g. `5/60` = 5 transfers per minute |
 | `ELISYM_WALLET_USDC` | `1` to expose USDC tools |
@@ -224,10 +229,10 @@ core/   chain-agnostic: Asset, SpendTracker, PolicyEngine, walletTools(), AgentW
 solana/ the first adapter: SolanaWallet implements AgentWallet
 ```
 
-Everything above the `AgentWallet` interface - spend limits, policy, agent tools, the MCP server - works with any implementation. An EVM adapter is an `EvmWallet implements AgentWallet` on top of viem: implement balances, the two transfer methods (with the reserve-before-sign guardrail order), history, address validation, and message signing, and every guardrail and tool is inherited unchanged - the tool set even renames itself (`transfer_eth` instead of `transfer_sol`) based on `wallet.nativeAsset`.
+Everything above the `AgentWallet` interface - spend limits, policy, agent tools, the MCP server - works with any implementation. An EVM adapter is an `EvmWallet implements AgentWallet` on top of viem: implement the `AgentWallet` contract - balances, the two transfer methods (with the reserve-before-sign guardrail order), `checkTransfer`, history, deposit waiting, address validation, message signing, and explorer links - and every guardrail and tool is inherited unchanged; the tool set even renames itself (`transfer_eth` instead of `transfer_sol`) based on `wallet.nativeAsset`.
 
 ```ts
-import type { AgentWallet } from '@elisym/wallet';
+import { walletTools, type AgentWallet } from '@elisym/wallet';
 
 class EvmWallet implements AgentWallet {
   readonly chain = 'ethereum';
@@ -242,7 +247,7 @@ const tools = walletTools(new EvmWallet(...)); // same guardrails, same tools
 
 ### Spend limits
 
-Per-asset caps checked **before signing**. The amount is reserved atomically (check-then-increment), so concurrent transfers cannot double-spend the remaining budget; a failed send returns the reservation, a confirmed one keeps it.
+Per-asset caps checked **before signing**. The amount is reserved atomically (check-then-increment), so concurrent transfers cannot double-spend the remaining budget. A send that provably fails before broadcast returns the reservation; an ambiguous failure during or after broadcast (send error, confirmation timeout) keeps it, because the transaction may still have landed.
 
 ```ts
 import { SolanaWallet, SpendTracker, SpendLimitError, NATIVE_SOL, USDC_MAINNET } from '@elisym/wallet';
@@ -264,6 +269,8 @@ wallet.spendTracker.status();              // [{ asset, spent, limit, remaining,
 Rolling-window budgets age out: spend from 25 hours ago no longer counts against a 24-hour cap. To keep a budget honest across restarts, persist it:
 
 ```ts
+import fs from 'node:fs/promises';
+
 // on shutdown (or after every transfer)
 await fs.writeFile('budget.json', JSON.stringify(wallet.spendTracker.toJSON()));
 
@@ -299,7 +306,7 @@ Policy checks run before spend limits and consume no budget when they reject.
 ### Backup and restore
 
 ```ts
-const secret = wallet.exportBase58();                     // solana-keygen compatible
+const secret = wallet.exportBase58();                     // same 64-byte layout as solana-keygen
 const restored = await SolanaWallet.fromBase58(secret);
 const fromBytes = await SolanaWallet.fromSecretKeyBytes(wallet.exportSecretKeyBytes());
 wallet.scrub();                                           // zero the in-memory key copy
@@ -315,7 +322,7 @@ const stored = encryptSecret(wallet.exportBase58(), 'correct horse battery stapl
 const secret = decryptSecret(stored, 'correct horse battery staple');
 ```
 
-The main `@elisym/wallet` entry point is browser-safe; only the `keystore` subpath depends on `node:crypto`.
+The main `@elisym/wallet` entry point is browser-safe; the `keystore` and `mcp` subpaths are Node/Bun-only (`keystore` depends on `node:crypto`, and `mcp` uses it internally).
 
 ### External signers (Turnkey, Privy, hardware, multisig)
 
@@ -336,12 +343,20 @@ await wallet.transferToken({ to, asset: USDC_MAINNET, amount: '1.25', memo: 'inv
 // recipient's associated token account is created automatically if missing
 
 // any SPL token works - describe it with an Asset
-const BONK = { token: 'bonk', mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5, symbol: 'BONK' };
+const BONK = {
+  chain: 'solana',
+  token: 'bonk',
+  mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+  decimals: 5,
+  symbol: 'BONK',
+};
 ```
 
 ### History, deposits, identity
 
 ```ts
+import { verifyMessageSignature } from '@elisym/wallet';
+
 // recent transactions, newest first, memos included
 const txs = await wallet.getRecentTransactions(10);
 // [{ signature, blockTime, err, memo, confirmationStatus, explorerUrl, slot }]
@@ -378,7 +393,7 @@ const max = await wallet.getMaxTransferableSol();
 | `wallet.exportSecretKeyBytes()` / `wallet.exportBase58()` / `wallet.scrub()` | Key backup and cleanup |
 | `wallet.explorerUrl(signature)` | Solana Explorer link |
 
-`config`: `{ network?, rpcUrl?, wsUrl?, commitment?, rpc?, rpcSubscriptions?, spendLimits?, spendTracker?, policy? }` - all optional. Defaults: mainnet-beta, public RPC, `confirmed` commitment, no caps, no policy.
+`config`: `{ network?, rpcUrl?, wsUrl?, commitment?, rpc?, rpcSubscriptions?, spendLimits?, spendTracker?, policy?, onSpendChange? }` - all optional. Defaults: mainnet-beta, public RPC, `confirmed` commitment, no caps, no policy. When `spendTracker` is provided, `spendLimits` is ignored - set caps on the shared tracker via `setLimit()` instead.
 
 Transfers resolve to `{ signature, explorerUrl, spendWarnings }` and reject with `SpendLimitError` / `PolicyViolationError` before signing when a guardrail trips. Amounts are `bigint` raw subunits or human decimal strings (`"0.5"`); parsing is exact integer math.
 

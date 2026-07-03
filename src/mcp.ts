@@ -231,7 +231,7 @@ export function networkFromEnv(env: Record<string, string | undefined>): SolanaN
   const network = (env.ELISYM_WALLET_NETWORK ?? 'mainnet-beta') as SolanaNetwork;
   if (!['devnet', 'mainnet-beta', 'testnet'].includes(network)) {
     throw new Error(
-      `Invalid ELISYM_WALLET_NETWORK "${network}". Expected devnet, mainnet-beta, or testnet.`,
+      `Invalid ELISYM_WALLET_NETWORK "${network}". Expected mainnet-beta, devnet, or testnet.`,
     );
   }
   return network;
@@ -252,7 +252,8 @@ export function spendLimitsFromEnv(env: Record<string, string | undefined>): Spe
     : undefined;
   if (windowHours !== undefined && (!Number.isFinite(windowHours) || windowHours <= 0)) {
     throw new Error(
-      `Invalid ELISYM_WALLET_SPEND_WINDOW_HOURS "${env.ELISYM_WALLET_SPEND_WINDOW_HOURS}".`,
+      `Invalid ELISYM_WALLET_SPEND_WINDOW_HOURS "${env.ELISYM_WALLET_SPEND_WINDOW_HOURS}". ` +
+        'Expected a positive number of hours, e.g. "24".',
     );
   }
   const windowMs = windowHours === undefined ? undefined : windowHours * 3_600_000;

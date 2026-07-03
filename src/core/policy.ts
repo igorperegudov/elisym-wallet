@@ -97,7 +97,7 @@ export class PolicyEngine {
 
     const assertPolicyAddress = (field: string, value: string): void => {
       if (options.isValidAddress && !options.isValidAddress(value)) {
-        throw new Error(`${field} contains an invalid address: "${value}"`);
+        throw new Error(`${field} contains an invalid address: "${value}".`);
       }
     };
 
@@ -116,10 +116,10 @@ export class PolicyEngine {
     if (policy.rateLimit) {
       const { maxTransfers, windowSecs } = policy.rateLimit;
       if (!Number.isInteger(maxTransfers) || maxTransfers <= 0) {
-        throw new Error(`rateLimit.maxTransfers must be a positive integer; got ${maxTransfers}`);
+        throw new Error(`rateLimit.maxTransfers must be a positive integer; got ${maxTransfers}.`);
       }
       if (!Number.isFinite(windowSecs) || windowSecs <= 0) {
-        throw new Error(`rateLimit.windowSecs must be positive; got ${windowSecs}`);
+        throw new Error(`rateLimit.windowSecs must be positive; got ${windowSecs}.`);
       }
       this.rateLimit = policy.rateLimit;
     }
@@ -151,7 +151,7 @@ export class PolicyEngine {
       throw new PolicyViolationError(
         'max_per_transfer',
         `Transfer of ${formatAmount(asset, amount)} exceeds the per-transfer cap of ` +
-          `${formatAmount(asset, cap.limit)}. Split the payment or raise the policy limit.`,
+          `${formatAmount(asset, cap.limit)}. Split the payment or raise the per-transfer cap.`,
       );
     }
 

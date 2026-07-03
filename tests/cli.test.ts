@@ -92,11 +92,11 @@ describe('generate', () => {
     expect(errors.join('\n')).toContain('--force');
   });
 
-  it('--save refuses to store the secret unencrypted without a passphrase or --allow-plaintext', async () => {
+  it('--save refuses to store the secret in plaintext without a passphrase or --allow-plaintext', async () => {
     const env = track(tempEnv());
     const { errors } = captureLogs();
     expect(await runCli(['generate', '--save'], env)).toBe(1);
-    expect(errors.join('\n')).toContain('Refusing to save the secret unencrypted');
+    expect(errors.join('\n')).toContain('Refusing to save the secret in plaintext');
     // and nothing was written
     await expect(readFile(env.ELISYM_WALLET_CONFIG!, 'utf8')).rejects.toThrow();
 

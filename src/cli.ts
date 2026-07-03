@@ -6,8 +6,9 @@
  * Configuration resolution: ELISYM_WALLET_* environment variables win over
  * the profile at ~/.elisym-wallet/config.json (managed via `config` commands),
  * which wins over defaults. Read-only commands (balance, history, address)
- * use the cached public address and never ask for a passphrase; `send`
- * decrypts the secret, prompting interactively when needed.
+ * use the cached public address when one is available and fall back to
+ * decrypting the secret otherwise; `send` always decrypts it, prompting
+ * interactively when needed.
  */
 
 import { Buffer } from 'node:buffer';
@@ -49,17 +50,21 @@ const USAGE = `elisym-wallet - a wallet for AI agents
 
 Setup:
   init [--passphrase <p>] [--network <n>]    Guided setup: generate a wallet, save it to
-       [--allow-plaintext]                   the profile with safe default spend limits.
+       [--allow-plaintext] [--force]         the profile with safe default spend limits.
                                              Encrypts the secret with --passphrase; storing
-                                             it unencrypted needs --allow-plaintext.
+                                             it in plaintext needs --allow-plaintext (or an
+                                             empty passphrase at the interactive prompt).
+                                             --force overwrites an existing wallet.
   generate [--passphrase <p>] [--save]       Create a keypair. Prints the secret; --save
-           [--allow-plaintext]               writes it to the profile (encrypted unless
-                                             --allow-plaintext).
+           [--allow-plaintext] [--force]     writes it to the profile (encrypted with
+                                             --passphrase; plaintext needs --allow-plaintext;
+                                             --force replaces an existing secret).
   config list                                Show settings and where each value comes from
                                              (the secret never appears in the output).
   config set <key> <value>                   Update a setting (validated immediately). For the
                                              secret, run "config set secret" with no value to
-                                             enter it interactively / via stdin instead of argv.
+                                             enter it interactively / via stdin instead of
+                                             argv; replacing a stored secret needs --force.
   config get <key> [--reveal] | unset | path Inspect or remove settings. The secret is
                                              printed only with an explicit --reveal.
   profiles                                   List wallets (default + named profiles).
@@ -228,7 +233,7 @@ async function context(env: Record<string, string | undefined>): Promise<CliCont
 
 /**
  * Read-only wallet for balance/history/address: uses the cached public
- * address when available so no passphrase is ever needed; falls back to
+ * address when available so no passphrase is needed; falls back to
  * decrypting the secret otherwise.
  */
 async function readonlyWallet(ctx: CliContext): Promise<SolanaWallet> {
@@ -274,7 +279,7 @@ async function cmdInit(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
   if (ctx.config.secret && !parsed.flags.has('--force')) {
     console.error(
       `A wallet already exists in ${ctx.paths.configFile} (address: ${ctx.config.address ?? 'unknown'}).\n` +
-        'Refusing to overwrite the secret - that would lose access to its funds.\n' +
+        'Refusing to overwrite the secret - you would lose access to its funds.\n' +
         'Pass --force only if you are sure.',
     );
     return 1;
@@ -289,14 +294,14 @@ async function cmdInit(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
       '',
     );
   }
-  // Never write the secret in cleartext by default in a non-interactive run:
+  // Never write the secret in plaintext by default in a non-interactive run:
   // an unattended `init` would otherwise silently store a plaintext key on
   // disk. An interactive user who left the prompt empty chose plaintext.
   if (!passphrase && !parsed.flags.has('--allow-plaintext') && !process.stdin.isTTY) {
     console.error(
-      'Refusing to store the secret unencrypted in a non-interactive run. Set a passphrase ' +
+      'Refusing to store the secret in plaintext in a non-interactive run. Set a passphrase ' +
         '(--passphrase or ELISYM_WALLET_PASSPHRASE), or pass --allow-plaintext to store it ' +
-        'in cleartext deliberately.',
+        'in plaintext deliberately.',
     );
     return 1;
   }
@@ -320,7 +325,7 @@ async function cmdInit(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
   await saveConfig(ctx.paths, config);
   wallet.scrub();
 
-  console.log(`Wallet created and saved to ${ctx.paths.configFile}`);
+  console.log(`Wallet created and saved to ${ctx.paths.configFile}.`);
   console.log(`  Address: ${config.address}`);
   console.log(`  Network: ${network}`);
   console.log(
@@ -331,9 +336,9 @@ async function cmdInit(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
       `max ${config['max-per-transfer']} SOL per transfer`,
   );
   console.log('');
-  console.log('Adjust limits:  elisym-wallet config set spend-limit 0.5');
-  console.log('Check balance:  elisym-wallet balance');
-  console.log(`Fund it, then send: elisym-wallet send <address> 0.1`);
+  console.log('Adjust limits:      elisym-wallet config set spend-limit 0.5');
+  console.log('Check balance:      elisym-wallet balance');
+  console.log('Fund it, then send: elisym-wallet send <address> 0.1');
   return 0;
 }
 
@@ -349,15 +354,15 @@ async function cmdGenerate(ctx: CliContext, parsed: ParsedArgs): Promise<number>
     if (!passphrase && !parsed.flags.has('--allow-plaintext')) {
       wallet.scrub();
       console.error(
-        'Refusing to save the secret unencrypted. Pass --passphrase (or set ' +
-          'ELISYM_WALLET_PASSPHRASE), or --allow-plaintext to store it in cleartext deliberately.',
+        'Refusing to save the secret in plaintext. Pass --passphrase (or set ' +
+          'ELISYM_WALLET_PASSPHRASE), or --allow-plaintext to store it in plaintext deliberately.',
       );
       return 1;
     }
     if (ctx.config.secret && !parsed.flags.has('--force')) {
       console.error(
         `The profile already holds a secret (address: ${ctx.config.address ?? 'unknown'}). ` +
-          'Pass --force to replace it.',
+          'Replacing it means losing access to the old wallet - pass --force if you are sure.',
       );
       return 1;
     }
@@ -404,7 +409,11 @@ async function cmdSend(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
       (a) => a.token === token.toLowerCase() || a.mint === token || a.symbol === token,
     );
     if (!found) {
-      console.error(`Unknown token "${token}". Enable USDC with: elisym-wallet config set usdc 1`);
+      const hint =
+        knownAssets.length === 0
+          ? 'Enable USDC with: elisym-wallet config set usdc 1'
+          : `Known tokens: sol, ${knownAssets.map((a) => a.token).join(', ')}.`;
+      console.error(`Unknown token "${token}". ${hint}`);
       return 1;
     }
     asset = found;
@@ -427,7 +436,7 @@ async function cmdSend(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
     // label (remaining() is the pre-send budget; nothing is reserved yet).
     const resolved = parseAmount(asset, amount);
     const after = remaining > resolved ? remaining - resolved : 0n;
-    console.log(`  Budget after send: ${formatAmount(asset, after)} remaining`);
+    console.log(`  Budget after send: ${formatAmount(asset, after)}`);
   }
 
   if (!parsed.flags.has('--yes')) {
@@ -520,7 +529,7 @@ async function cmdConfig(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
       if (key === 'secret') {
         if (ctx.config.secret && !parsed.flags.has('--force')) {
           console.error(
-            'The profile already holds a secret. Replacing it loses access to the old ' +
+            'The profile already holds a secret. Replacing it means losing access to the old ' +
               'wallet - pass --force if you are sure.',
           );
           return 1;
@@ -535,7 +544,7 @@ async function cmdConfig(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
         }
       }
       await saveConfig(ctx.paths, next);
-      console.log(`${key} saved to ${ctx.paths.configFile}`);
+      console.log(`${key} saved to ${ctx.paths.configFile}.`);
       return 0;
     }
     case 'unset': {
@@ -616,6 +625,10 @@ export async function runCli(
       case 'history': {
         const wallet = await readonlyWallet(ctx);
         const limitRaw = parsed.flags.get('--limit') as string | undefined;
+        // Validate here so the user sees their own input, not "got NaN".
+        if (limitRaw !== undefined && !/^[1-9]\d*$/.test(limitRaw)) {
+          throw new Error(`--limit must be a positive integer; got "${limitRaw}".`);
+        }
         const limit = limitRaw === undefined ? 10 : Number(limitRaw);
         return await runTool(wallet, [], 'get_recent_transactions', { limit });
       }

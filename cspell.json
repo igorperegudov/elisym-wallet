@@ -37,7 +37,6 @@
     "toctou",
     "tsup",
     "typecheck",
-    "unstyled",
     "viem"
   ],
   "ignorePaths": ["node_modules", "dist", "bun.lock", ".git"]

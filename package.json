@@ -1,7 +1,7 @@
 {
   "name": "@elisym/wallet",
   "version": "0.1.0",
-  "description": "Lightweight Solana wallet library - keypair management, encrypted key storage, SOL and SPL token balances and transfers",
+  "description": "Wallet library for AI agents - hard spend limits, transfer policies, two-step agent tools, and an MCP server mode. Solana first: SOL + SPL transfers, encrypted key storage",
   "keywords": [
     "solana",
     "wallet",
@@ -11,7 +11,8 @@
     "web3",
     "payments",
     "elisym",
-    "ai-agents"
+    "ai-agents",
+    "mcp"
   ],
   "homepage": "https://github.com/elisymlabs/elisym-wallet",
   "bugs": {

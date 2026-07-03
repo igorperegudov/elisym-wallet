@@ -52,7 +52,7 @@ import type {
   TransferTokenParams,
   WaitForDepositParams,
 } from '../core/agent-wallet.js';
-import { NATIVE_SOL, resolveAmount } from '../core/assets.js';
+import { NATIVE_SOL, formatAmount, resolveAmount } from '../core/assets.js';
 import type { Asset } from '../core/assets.js';
 import { PolicyEngine } from '../core/policy.js';
 import type { WalletPolicy } from '../core/policy.js';
@@ -240,7 +240,7 @@ export class SolanaWallet implements AgentWallet {
     return new Uint8Array(this.secretKeyBytes);
   }
 
-  /** Base58-encoded secret key for backup (solana-keygen compatible). */
+  /** Base58-encoded secret key for backup (same 64-byte layout as solana-keygen). */
   exportBase58(): string {
     if (!this.secretKeyBytes) {
       throw new Error('Secret key is not available: this wallet uses an external signer.');
@@ -328,9 +328,9 @@ export class SolanaWallet implements AgentWallet {
    *
    * Only the transferred `amount` is charged against the SOL cap, not the
    * ~5000-lamport network fee: counting the fee would make "send exactly the
-   * cap" fail, and the fee is negligible and non-reclaimable (it goes to the
-   * validator, not a recipient), so it is not a drain vector the way a token
-   * transfer's reclaimable ATA rent is.
+   * cap" fail, and the fee is negligible and non-reclaimable (burned or paid
+   * to the validator, never to a recipient), so it is not a drain vector the
+   * way a token transfer's reclaimable ATA rent is.
    */
   async transferNative(params: TransferNativeParams): Promise<TransferResult> {
     assertRecipientAddress(params.to);
@@ -417,7 +417,7 @@ export class SolanaWallet implements AgentWallet {
   /**
    * True when an account exists on-chain (used to know if a token transfer pays
    * ATA rent). This is a pre-flight check, so it is a TOCTOU with the on-chain
-   * state at execution: a recipient who creates then closes their ATA between
+   * state at execution: a recipient who closes their pre-existing ATA between
    * the check and the broadcast can make the wallet pay ~0.002 SOL of rent that
    * the SOL cap did not count. The exposure is bounded (one ATA rent per
    * transfer, rate-limitable) and requires the attacker to be the transfer's
@@ -437,7 +437,7 @@ export class SolanaWallet implements AgentWallet {
    */
   async getRecentTransactions(limit = 10): Promise<TransactionSummary[]> {
     if (!Number.isInteger(limit) || limit <= 0 || limit > 1000) {
-      throw new Error(`limit must be an integer between 1 and 1000; got ${limit}`);
+      throw new Error(`limit must be an integer between 1 and 1000; got ${limit}.`);
     }
     // getSignaturesForAddress accepts only 'confirmed' | 'finalized'.
     const commitment = this.commitment === 'processed' ? 'confirmed' : this.commitment;
@@ -477,7 +477,7 @@ export class SolanaWallet implements AgentWallet {
       if (Date.now() + pollIntervalMs > deadline) {
         throw new Error(
           `waitForDeposit timed out after ${timeoutMs}ms: ` +
-            `balance is ${balance} of ${target} required ${asset.symbol} subunits.`,
+            `balance is ${formatAmount(asset, balance)}, need ${formatAmount(asset, target)}.`,
         );
       }
       await sleep(pollIntervalMs, params.signal);

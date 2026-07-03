@@ -216,7 +216,7 @@ export function validateConfigValue(key: ConfigKey, value: string): string {
       return trimmed;
     case 'network':
       if (!['devnet', 'mainnet-beta', 'testnet'].includes(trimmed)) {
-        throw new Error(`Invalid network "${trimmed}". Expected devnet, mainnet-beta, or testnet.`);
+        throw new Error(`Invalid network "${trimmed}". Expected mainnet-beta, devnet, or testnet.`);
       }
       return trimmed;
     case 'rpc-url':
@@ -312,9 +312,11 @@ export async function loadSpendTracker(paths: CliPaths): Promise<SpendTracker> {
   try {
     return SpendTracker.fromJSON(JSON.parse(raw) as SpendTrackerSnapshot);
   } catch (e) {
+    // Strip the inner message's trailing period so the composed text reads as
+    // one sentence chain instead of "...array.. Refusing...".
+    const message = (e instanceof Error ? e.message : String(e)).replace(/\.$/, '');
     throw new Error(
-      `Spend ledger at ${paths.spendFile} is corrupt or invalid: ` +
-        `${e instanceof Error ? e.message : String(e)}. ` +
+      `Spend ledger at ${paths.spendFile} is corrupt or invalid: ${message}. ` +
         'Refusing to proceed with a reset budget - inspect or remove the file to continue.',
     );
   }
