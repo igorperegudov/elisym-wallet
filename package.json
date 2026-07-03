@@ -1,0 +1,106 @@
+{
+  "name": "@elisym/wallet",
+  "version": "0.1.0",
+  "description": "Lightweight Solana wallet library - keypair management, encrypted key storage, SOL and SPL token balances and transfers",
+  "keywords": [
+    "solana",
+    "wallet",
+    "keypair",
+    "spl-token",
+    "usdc",
+    "web3",
+    "payments",
+    "elisym",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/elisymlabs/elisym-wallet",
+  "bugs": {
+    "url": "https://github.com/elisymlabs/elisym-wallet/issues"
+  },
+  "license": "MIT",
+  "author": "elisym labs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elisymlabs/elisym-wallet.git"
+  },
+  "bin": {
+    "elisym-wallet": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./keystore": {
+      "import": {
+        "types": "./dist/keystore.d.ts",
+        "default": "./dist/keystore.js"
+      },
+      "require": {
+        "types": "./dist/keystore.d.cts",
+        "default": "./dist/keystore.cjs"
+      }
+    },
+    "./mcp": {
+      "import": {
+        "types": "./dist/mcp.d.ts",
+        "default": "./dist/mcp.js"
+      },
+      "require": {
+        "types": "./dist/mcp.d.cts",
+        "default": "./dist/mcp.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/ tests/",
+    "format": "oxfmt src/ tests/",
+    "format:check": "oxfmt --check src/ tests/",
+    "spell": "cspell --no-progress \"src/**\" \"tests/**\" \"*.md\"",
+    "qa": "tsup && vitest run && tsc --noEmit && oxlint src/ tests/ && oxfmt --check src/ tests/ && cspell --no-progress \"src/**\" \"tests/**\" \"*.md\"",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run qa"
+  },
+  "dependencies": {
+    "@solana-program/memo": "~0.11.0",
+    "@solana-program/system": "~0.12.0",
+    "@solana-program/token": "~0.5.0",
+    "@solana/kit": "~6.8.0",
+    "decimal.js-light": "~2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "~22.0.0",
+    "cspell": "~9.0.0",
+    "oxfmt": "~0.42.0",
+    "oxlint": "~0.16.0",
+    "tsup": "~8.4.0",
+    "typescript": "~5.7.0",
+    "vitest": "~3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
