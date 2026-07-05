@@ -103,7 +103,7 @@ LangChain, ElizaOS, and anything else with function calling work the same way: t
 
 ## Command line
 
-The `elisym-wallet` CLI manages a wallet profile at `~/.elisym-wallet/config.json` (override with `$ELISYM_WALLET_CONFIG`). Settings resolve as: **environment variable > profile > default** - so the same profile drives interactive use, scripts, and the MCP server.
+The `elisym-wallet` CLI manages a wallet profile at `~/.elisym-wallet/config.json` (override with `ELISYM_WALLET_CONFIG`). Settings resolve as: **environment variable > profile > default** - so the same profile drives interactive use, scripts, and the MCP server.
 
 ```sh
 # guided setup: generates a keypair, encrypts it with your passphrase,
@@ -130,7 +130,7 @@ Config keys: `secret`, `address`, `network`, `rpc-url`, `spend-limit`, `spend-wi
 
 ### Multiple wallets (profiles)
 
-Every command takes `--profile <name>` (or `$ELISYM_WALLET_PROFILE`) - each profile is a fully separate wallet with its own secret, settings, and spend budget, stored under `~/.elisym-wallet/profiles/<name>/`:
+Every command takes `--profile <name>` (or `ELISYM_WALLET_PROFILE`) - each profile is a fully separate wallet with its own secret, settings, and spend budget, stored under `~/.elisym-wallet/profiles/<name>/`:
 
 ```sh
 npx @elisym/wallet init --profile trading
@@ -147,7 +147,7 @@ claude mcp add wallet-trading -e ELISYM_WALLET_PROFILE=trading -e ELISYM_WALLET_
 claude mcp add wallet-ops     -e ELISYM_WALLET_PROFILE=ops     -e ELISYM_WALLET_PASSPHRASE=... -- npx @elisym/wallet mcp
 ```
 
-`$ELISYM_WALLET_CONFIG` (explicit config file) wins over profiles; `$ELISYM_WALLET_HOME` relocates the whole `~/.elisym-wallet` directory. In code, multiple wallets are just multiple `SolanaWallet` instances - optionally sharing one `SpendTracker` for a common budget.
+`ELISYM_WALLET_CONFIG` (explicit config file) wins over profiles; `ELISYM_WALLET_HOME` relocates the whole `~/.elisym-wallet` directory. In code, multiple wallets are just multiple `SolanaWallet` instances - optionally sharing one `SpendTracker` for a common budget.
 
 UX details that matter:
 

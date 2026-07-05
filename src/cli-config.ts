@@ -305,8 +305,10 @@ export async function loadSpendTracker(paths: CliPaths): Promise<SpendTracker> {
     if ((e as { code?: string }).code === 'ENOENT') {
       return new SpendTracker();
     }
+    const message = (e instanceof Error ? e.message : String(e)).replace(/\.$/, '');
     throw new Error(
-      `Cannot read spend ledger at ${paths.spendFile}: ${e instanceof Error ? e.message : String(e)}`,
+      `Cannot read spend ledger at ${paths.spendFile}: ${message}. ` +
+        'Fix the file permissions or remove the file to continue.',
     );
   }
   try {

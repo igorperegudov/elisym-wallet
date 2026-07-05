@@ -13,6 +13,7 @@
 
 import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline';
@@ -56,7 +57,7 @@ Setup:
                                              empty passphrase at the interactive prompt).
                                              --force overwrites an existing wallet.
   generate [--passphrase <p>] [--save]       Create a keypair. Prints the secret; --save
-           [--allow-plaintext] [--force]     writes it to the profile (encrypted with
+           [--allow-plaintext] [--force]     writes it to the profile instead (encrypted with
                                              --passphrase; plaintext needs --allow-plaintext;
                                              --force replaces an existing secret).
   config list                                Show settings and where each value comes from
@@ -65,8 +66,9 @@ Setup:
                                              secret, run "config set secret" with no value to
                                              enter it interactively / via stdin instead of
                                              argv; replacing a stored secret needs --force.
-  config get <key> [--reveal] | unset | path Inspect or remove settings. The secret is
-                                             printed only with an explicit --reveal.
+  config get|unset <key> | config path       Inspect or remove a setting; "path" prints
+                                             the config file location. The secret is
+                                             printed only with an explicit "get --reveal".
   profiles                                   List wallets (default + named profiles).
 
 Wallet:
@@ -74,15 +76,16 @@ Wallet:
   balance                                    Show SOL/token balances and spend budget.
   send <to> <amount> [--token usdc]          Send funds (preview + confirmation).
        [--memo <text>] [--yes]
-  history [--limit <n>]                      Recent transactions with memos.
+  history [--limit <n>]                      Recent transactions with memos
+                                             (default 10, max 50).
 
 Integration:
   mcp                                        Run as an MCP stdio server for Claude/Cursor.
 
-Every command accepts --profile <name> (or $ELISYM_WALLET_PROFILE) to work with a
+Every command accepts --profile <name> (or ELISYM_WALLET_PROFILE) to work with a
 separate wallet stored at ~/.elisym-wallet/profiles/<name>/. Without it the default
-profile at ~/.elisym-wallet/config.json is used. $ELISYM_WALLET_CONFIG points at an
-explicit config file and wins over both; $ELISYM_WALLET_HOME relocates the base dir.
+profile at ~/.elisym-wallet/config.json is used. ELISYM_WALLET_CONFIG points at an
+explicit config file and wins over both; ELISYM_WALLET_HOME relocates the base dir.
 
 Config keys: ${Object.keys(CONFIG_KEYS).join(', ')}
 Every key can also be set via its ELISYM_WALLET_* environment variable
@@ -202,11 +205,25 @@ async function readSecretInput(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8').trim();
 }
 
-/** Ensure a decryptable secret is reachable, prompting for the passphrase if needed. */
+/**
+ * Ensure a decryptable secret is reachable, prompting for the passphrase if
+ * needed. Mirrors walletFromEnv's precedence (ELISYM_WALLET_SECRET_FILE wins
+ * over ELISYM_WALLET_SECRET) so the prompt decision is made against the
+ * secret that will actually be used.
+ */
 async function ensurePassphrase(
   env: Record<string, string | undefined>,
 ): Promise<Record<string, string | undefined>> {
-  const secret = env.ELISYM_WALLET_SECRET;
+  let secret = env.ELISYM_WALLET_SECRET;
+  if (env.ELISYM_WALLET_SECRET_FILE) {
+    try {
+      secret = (await readFile(env.ELISYM_WALLET_SECRET_FILE, 'utf8')).trim();
+    } catch {
+      // Unreadable file: skip the prompt and let walletFromEnv surface the
+      // actual read error with context.
+      return env;
+    }
+  }
   if (!secret || !isEncrypted(secret) || env.ELISYM_WALLET_PASSPHRASE) {
     return env;
   }
@@ -279,7 +296,7 @@ async function cmdInit(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
   if (ctx.config.secret && !parsed.flags.has('--force')) {
     console.error(
       `A wallet already exists in ${ctx.paths.configFile} (address: ${ctx.config.address ?? 'unknown'}).\n` +
-        'Refusing to overwrite the secret - you would lose access to its funds.\n' +
+        "Refusing to overwrite the secret - you would lose access to that wallet's funds.\n" +
         'Pass --force only if you are sure.',
     );
     return 1;
@@ -362,7 +379,7 @@ async function cmdGenerate(ctx: CliContext, parsed: ParsedArgs): Promise<number>
     if (ctx.config.secret && !parsed.flags.has('--force')) {
       console.error(
         `The profile already holds a secret (address: ${ctx.config.address ?? 'unknown'}). ` +
-          'Replacing it means losing access to the old wallet - pass --force if you are sure.',
+          'Replacing it means losing access to the old wallet - pass --force only if you are sure.',
       );
       return 1;
     }
@@ -372,8 +389,9 @@ async function cmdGenerate(ctx: CliContext, parsed: ParsedArgs): Promise<number>
     );
   } else if (passphrase) {
     console.log(`Secret (encrypted): ${stored}`);
-    console.log('Set ELISYM_WALLET_SECRET to the encrypted value and');
-    console.log('ELISYM_WALLET_PASSPHRASE to your passphrase, or re-run with --save.');
+    console.log('Set ELISYM_WALLET_SECRET to the encrypted value and ELISYM_WALLET_PASSPHRASE');
+    console.log('to your passphrase, or store THIS wallet in the profile with:');
+    console.log('elisym-wallet config set secret   (paste the encrypted value at the prompt)');
   } else {
     console.log(`Secret (base58): ${stored}`);
     console.log('KEEP THIS SECRET SAFE - anyone holding it controls the wallet.');
@@ -426,10 +444,10 @@ async function cmdSend(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
   console.log('Transfer preview:');
   console.log(`  Amount:    ${amount} ${asset.symbol}`);
   console.log(`  Recipient: ${to}`);
-  console.log(`  Network:   ${wallet.network}`);
   if (memo) {
     console.log(`  Memo:      ${memo}`);
   }
+  console.log(`  Network:   ${wallet.network}`);
   const remaining = wallet.spendTracker.remaining(asset);
   if (remaining !== null) {
     // Subtract this transfer so the figure is the budget AFTER it, matching the
@@ -485,7 +503,8 @@ async function cmdConfig(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
           continue;
         }
         const source = fromEnv !== undefined ? 'env' : fromFile !== undefined ? 'file' : 'default';
-        console.log(`${configKey.padEnd(20)} ${resolved}  (${source})`);
+        // padEnd must cover the longest key ('usdc-max-per-transfer', 21 chars).
+        console.log(`${configKey.padEnd(22)} ${resolved}  (${source})`);
       }
       return 0;
     }
@@ -530,7 +549,7 @@ async function cmdConfig(ctx: CliContext, parsed: ParsedArgs): Promise<number> {
         if (ctx.config.secret && !parsed.flags.has('--force')) {
           console.error(
             'The profile already holds a secret. Replacing it means losing access to the old ' +
-              'wallet - pass --force if you are sure.',
+              'wallet - pass --force only if you are sure.',
           );
           return 1;
         }
@@ -625,9 +644,10 @@ export async function runCli(
       case 'history': {
         const wallet = await readonlyWallet(ctx);
         const limitRaw = parsed.flags.get('--limit') as string | undefined;
-        // Validate here so the user sees their own input, not "got NaN".
-        if (limitRaw !== undefined && !/^[1-9]\d*$/.test(limitRaw)) {
-          throw new Error(`--limit must be a positive integer; got "${limitRaw}".`);
+        // Validate here so the user sees their own input, not "got NaN", and
+        // is told the range instead of getting a silently clamped result.
+        if (limitRaw !== undefined && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 50)) {
+          throw new Error(`--limit must be an integer between 1 and 50; got "${limitRaw}".`);
         }
         const limit = limitRaw === undefined ? 10 : Number(limitRaw);
         return await runTool(wallet, [], 'get_recent_transactions', { limit });
@@ -654,9 +674,14 @@ export async function runCli(
         await runMcpServer({ name: 'elisym-wallet', version: packageVersion(), tools });
         return 0;
       }
-      default:
+      default: {
+        const isHelp = command === undefined || command === 'help';
+        if (!isHelp) {
+          console.error(`Unknown command "${command}".`);
+        }
         console.log(USAGE);
-        return command === undefined || command === 'help' ? 0 : 1;
+        return isHelp ? 0 : 1;
+      }
     }
   } catch (e) {
     console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);

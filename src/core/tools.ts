@@ -164,7 +164,7 @@ export function walletTools(wallet: AgentWallet, options: WalletToolsOptions = {
     if (confirm && confirmNonce) {
       const stored = consumeNonce(confirmNonce);
       if (!stored) {
-        return 'Error: confirmation nonce is invalid or expired. Call again without confirm_nonce for a fresh preview.';
+        return 'Error: Confirmation nonce is invalid or expired. Call again without confirm_nonce for a fresh preview.';
       }
       if (
         stored.kind !== entry.kind ||
@@ -173,7 +173,7 @@ export function walletTools(wallet: AgentWallet, options: WalletToolsOptions = {
         stored.token !== entry.token ||
         stored.memo !== entry.memo
       ) {
-        return 'Error: confirmation nonce does not match these parameters. Call again without confirm_nonce for a fresh preview.';
+        return 'Error: Confirmation nonce does not match these parameters. Call again without confirm_nonce for a fresh preview.';
       }
     }
     const result = await executeTransfer();
